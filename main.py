@@ -201,16 +201,17 @@ def main():
                                        normalize,
                                    ]))
     else:
-        traindir = os.path.join(args.data, 'train')
         valdir = os.path.join(args.data, 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
-        train_set = datasets.ImageFolder(traindir, transforms.Compose([
-            transforms.RandomSizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]))
+        if not args.evaluate:
+            traindir = os.path.join(args.data, 'train')
+            train_set = datasets.ImageFolder(traindir, transforms.Compose([
+                transforms.RandomSizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]))
 
         val_set = datasets.ImageFolder(valdir, transforms.Compose([
             transforms.Scale(256),
@@ -219,19 +220,23 @@ def main():
             normalize,
         ]))
 
-    train_loader = torch.utils.data.DataLoader(
-        train_set,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
-
     val_loader = torch.utils.data.DataLoader(
         val_set,
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
     if args.evaluate:
-        validate(val_loader, model, criterion)
+        if args.pretrained:
+            feature_extractor(val_loader, model)
+            #feature_extractor2(val_loader, model)  # normalization is slower and unclear
+        else:        
+            validate(val_loader, model, criterion) 
         return
+
+    train_loader = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers, pin_memory=True)
 
     for epoch in range(args.start_epoch, args.epochs):
         ### Train for one epoch
@@ -337,7 +342,72 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       data_time=data_time, loss=losses, top1=top1, top5=top5, lr=lr))
     return 100. - top1.avg, 100. - top5.avg, losses.avg, running_lr
 
+def fliplr(img):
+    '''flip horizontal'''
+    inv_idx = torch.arange(img.size(3)-1,-1,-1).long()  # N x C x H x W
+    img_flip = img.index_select(3,inv_idx)
+    return img_flip
 
+def feature_extractor2(dataloaders, model):
+    
+    import scipy.io as sio
+    
+    s = 'Hist_test_256'
+    
+    features = torch.FloatTensor()
+    count = 0
+    for data in dataloaders:
+        img, label = data
+        n, c, h, w = img.size()
+        count += n
+        print('FE2 Test: [{0}/{1}]\t'.format (count, len(dataloaders)))
+        ff = torch.FloatTensor(n,1000).zero_()
+        for i in range(2):
+            if(i==1):
+                img = fliplr(img)
+            input_img = torch.autograd.Variable(img.cuda())
+            outputs = model(input_img) 
+            f = outputs.data.cpu()
+            #print(f.size())
+            ff = ff+f
+        # norm feature
+        fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
+        ff = ff.div(fnorm.expand_as(ff))
+        features = torch.cat((features,ff), 0)
+    
+    sio.savemat('features/' +s+ '.mat', {s:features.numpy()})
+    
+    return features
+
+def feature_extractor(val_loader, model):
+    
+    import numpy as np
+    import scipy.io as sio
+    
+    ### Switch to evaluate mode
+    model.eval()
+
+    ### Feature vector to be saved
+    features = []
+    #features = torch.FloatTensor()
+    
+    s = 'Hist_test_256'
+    
+    for i, (input, _) in enumerate(val_loader):
+        input_var = torch.autograd.Variable(input, volatile=True)
+        ff = model(input_var).data.cpu()
+        fnorm = torch.norm(ff, p=2, dim=1, keepdim=True)
+        output = ff.div(fnorm.expand_as(ff)).numpy()
+        features.append(output[0])
+        #features = torch.cat((features,output), 0)
+        if i % args.print_freq == 0:
+            print('FE1 Test: [{0}/{1}]\t'.format (i, len(val_loader)))
+        #val_loader.dataset.imgs[i][0][-25:], i))
+        
+    sio.savemat('features/' +s+ '.mat', {s:np.array(features)})
+    
+    return
+  
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -368,14 +438,16 @@ def validate(val_loader, model, criterion):
         end = time.time()
 
         if i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                      i, len(val_loader), batch_time=batch_time, loss=losses,
-                      top1=top1, top5=top5))
-
+            #print('Test: [{0}/{1}]\t'
+            #      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+            #      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+            #      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+            #      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+            #          i, len(val_loader), batch_time=batch_time, loss=losses,
+            #          top1=top1, top5=top5))
+            print('{0}\t'
+                  '{top1.val:.3f}\t'
+                  '{top1.avg:.3f}\t'.format(val_loader.dataset.imgs[i], i, top1=top1))
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
 
