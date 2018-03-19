@@ -201,16 +201,17 @@ def main():
                                        normalize,
                                    ]))
     else:
-        traindir = os.path.join(args.data, 'train')
         valdir = os.path.join(args.data, 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
-        train_set = datasets.ImageFolder(traindir, transforms.Compose([
-            transforms.RandomSizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]))
+        if not args.evaluate:
+            traindir = os.path.join(args.data, 'train')
+            train_set = datasets.ImageFolder(traindir, transforms.Compose([
+                transforms.RandomSizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]))
 
         val_set = datasets.ImageFolder(valdir, transforms.Compose([
             transforms.Scale(256),
@@ -218,11 +219,6 @@ def main():
             transforms.ToTensor(),
             normalize,
         ]))
-
-    train_loader = torch.utils.data.DataLoader(
-        train_set,
-        batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True)
 
     val_loader = torch.utils.data.DataLoader(
         val_set,
@@ -232,6 +228,11 @@ def main():
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
+
+    train_loader = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers, pin_memory=True)
 
     for epoch in range(args.start_epoch, args.epochs):
         ### Train for one epoch
@@ -368,14 +369,16 @@ def validate(val_loader, model, criterion):
         end = time.time()
 
         if i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                      i, len(val_loader), batch_time=batch_time, loss=losses,
-                      top1=top1, top5=top5))
-
+            #print('Test: [{0}/{1}]\t'
+            #      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+            #      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+            #      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+            #      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+            #          i, len(val_loader), batch_time=batch_time, loss=losses,
+            #          top1=top1, top5=top5))
+            print('{0}\t'
+                  '{top1.val:.3f}\t'
+                  '{top1.avg:.3f}\t'.format(val_loader.dataset.imgs[i], i, top1=top1))
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(top1=top1, top5=top5))
 
